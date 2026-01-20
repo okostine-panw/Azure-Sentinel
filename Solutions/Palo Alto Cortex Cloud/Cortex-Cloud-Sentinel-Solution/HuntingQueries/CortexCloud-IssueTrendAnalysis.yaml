@@ -1,0 +1,65 @@
+id: 4d5e6f7a-8b9c-0d1e-2f3a-4b5c6d7e8f9a
+name: Cortex Cloud - Issue Trend Analysis
+description: |
+  This hunting query analyzes trends in Cortex Cloud issues over time to identify patterns, spikes, or anomalies.
+  Use this query to:
+  - Identify increasing issue trends by category or severity
+  - Detect unusual spikes in issue creation
+  - Compare current issue rates to historical baselines
+requiredDataConnectors:
+  - connectorId: PaloAltoCortexCloud
+    dataTypes:
+      - CortexCloudIssues_CL
+tactics:
+  - Discovery
+relevantTechniques:
+  - T1046
+  - T1083
+query: |
+  let timeframe = 30d;
+  let binSize = 1h;
+  CortexCloudIssues_CL
+  | where TimeGenerated > ago(timeframe)
+  | extend 
+      Severity = tostring(Severity),
+      Category = tostring(Category),
+      Status = tostring(Status)
+  | make-series 
+      TotalIssues = count(),
+      CriticalIssues = countif(Severity in ("critical", "Critical")),
+      HighIssues = countif(Severity in ("high", "High")),
+      MediumIssues = countif(Severity in ("medium", "Medium")),
+      LowIssues = countif(Severity in ("low", "Low"))
+      on TimeGenerated from ago(timeframe) to now() step binSize
+  | extend 
+      (AnomaliesCritical, ScoreCritical, BaselineCritical) = series_decompose_anomalies(CriticalIssues, 1.5, -1, 'linefit'),
+      (AnomaliesHigh, ScoreHigh, BaselineHigh) = series_decompose_anomalies(HighIssues, 1.5, -1, 'linefit'),
+      (AnomaliesTotal, ScoreTotal, BaselineTotal) = series_decompose_anomalies(TotalIssues, 1.5, -1, 'linefit')
+  | mv-expand 
+      TimeGenerated to typeof(datetime),
+      TotalIssues to typeof(long),
+      CriticalIssues to typeof(long),
+      HighIssues to typeof(long),
+      MediumIssues to typeof(long),
+      LowIssues to typeof(long),
+      AnomaliesCritical to typeof(double),
+      AnomaliesHigh to typeof(double),
+      AnomaliesTotal to typeof(double),
+      ScoreCritical to typeof(double),
+      ScoreHigh to typeof(double),
+      ScoreTotal to typeof(double)
+  | where AnomaliesCritical != 0 or AnomaliesHigh != 0 or AnomaliesTotal != 0
+  | project 
+      TimeGenerated,
+      TotalIssues,
+      CriticalIssues,
+      HighIssues,
+      MediumIssues,
+      LowIssues,
+      CriticalAnomaly = AnomaliesCritical,
+      HighAnomaly = AnomaliesHigh,
+      TotalAnomaly = AnomaliesTotal,
+      CriticalScore = round(ScoreCritical, 2),
+      HighScore = round(ScoreHigh, 2),
+      TotalScore = round(ScoreTotal, 2)
+  | order by TimeGenerated desc

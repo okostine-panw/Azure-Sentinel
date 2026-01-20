@@ -1,0 +1,50 @@
+{
+  "Name": "PaloAltoCortexCloud",
+  "Author": "Palo Alto Networks",
+  "Logo": "<svg>...</svg>",
+  "Description": "The Palo Alto Networks Cortex Cloud Microsoft Sentinel Solution provides comprehensive integration to ingest Issues (security alerts) and Cases (incidents) from Cortex Cloud platform via API.",
+  "Data Connectors": [
+    "DataConnectors/Palo_Alto_Cortex_Cloud_CCP.json"
+  ],
+  "Parsers": [
+    "Parsers/CortexCloudIssues.kql",
+    "Parsers/CortexCloudCases.kql"
+  ],
+  "Workbooks": [
+    "Workbooks/CortexCloud-Overview.json"
+  ],
+  "Analytic Rules": [
+    "AnalyticRules/CortexCloud-CriticalIssue.yaml",
+    "AnalyticRules/CortexCloud-CaseSLABreach.yaml",
+    "AnalyticRules/CortexCloud-MultipleIssuesOnAsset.yaml"
+  ],
+  "Hunting Queries": [
+    "HuntingQueries/CortexCloud-IssueTrendAnalysis.yaml"
+  ],
+  "Playbooks": [
+    "Playbooks/CortexCloud-EnrichIssue.json"
+  ],
+  "BasePath": "https://raw.githubusercontent.com/Azure/Azure-Sentinel/master/Solutions/PaloAltoCortexCloud",
+  "Version": "1.0.0",
+  "Metadata": "SolutionMetadata.json",
+  "TemplateSpec": true,
+  "Is1PConnector": false,
+  "publisherId": "paloaltonetworks",
+  "offerId": "paloaltonetworks_cortexcloud_mss",
+  "providers": [
+    "Palo Alto Networks"
+  ],
+  "categories": {
+    "domains": [
+      "Security - Threat Protection",
+      "Security - Cloud Security"
+    ]
+  },
+  "firstPublishDate": "2026-01-07",
+  "support": {
+    "tier": "Partner",
+    "name": "Palo Alto Networks",
+    "email": "support@paloaltonetworks.com",
+    "link": "https://support.paloaltonetworks.com"
+  }
+}

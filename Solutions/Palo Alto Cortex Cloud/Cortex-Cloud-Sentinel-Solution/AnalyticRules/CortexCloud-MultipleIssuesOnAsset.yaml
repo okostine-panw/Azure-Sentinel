@@ -1,0 +1,94 @@
+id: 3c4d5e6f-7a8b-9c0d-1e2f-3a4b5c6d7e8f
+name: Cortex Cloud - Multiple Issues on Same Asset
+description: |
+  This rule detects when multiple high or critical severity issues are identified on the same asset within a short time period.
+  This pattern may indicate a compromised or highly vulnerable asset that requires immediate investigation and remediation.
+severity: High
+requiredDataConnectors:
+  - connectorId: PaloAltoCortexCloud
+    dataTypes:
+      - CortexCloudIssues_CL
+queryFrequency: PT15M
+queryPeriod: PT2H
+triggerOperator: GreaterThan
+triggerThreshold: 0
+tactics:
+  - InitialAccess
+  - Execution
+  - Persistence
+  - PrivilegeEscalation
+  - LateralMovement
+relevantTechniques:
+  - T1190
+  - T1078
+  - T1053
+  - T1021
+query: |
+  CortexCloudIssues_CL
+  | where Severity in ("critical", "Critical", "high", "High")
+  | where Status != "closed" and Status != "Closed" and Status != "resolved" and Status != "Resolved"
+  | extend AffectedAssetList = parse_json(AffectedAssets)
+  | mv-expand AffectedAsset = AffectedAssetList
+  | extend AssetName = tostring(AffectedAsset.name), AssetId = tostring(AffectedAsset.id)
+  | where isnotempty(AssetName)
+  | summarize 
+      IssueCount = count(),
+      IssueIds = make_set(IssueId, 100),
+      IssueTitles = make_set(Title, 100),
+      Severities = make_set(Severity, 100),
+      Categories = make_set(Category, 100),
+      FirstIssueTime = min(CreatedTime),
+      LastIssueTime = max(CreatedTime),
+      TimeGenerated = max(TimeGenerated)
+      by AssetName, AssetId
+  | where IssueCount >= 3  // Alert when 3 or more issues on same asset
+  | extend 
+      TimeSpanHours = datetime_diff('hour', LastIssueTime, FirstIssueTime),
+      HasCritical = array_length(array_slice(Severities, 0, 1)) > 0 and Severities[0] in ("critical", "Critical")
+  | extend AlertSeverity = iff(HasCritical or IssueCount >= 5, "High", "Medium")
+  | project 
+      TimeGenerated,
+      AssetName,
+      AssetId,
+      IssueCount,
+      IssueIds,
+      IssueTitles,
+      Severities,
+      Categories,
+      FirstIssueTime,
+      LastIssueTime,
+      TimeSpanHours,
+      AlertSeverity
+entityMappings:
+  - entityType: Host
+    fieldMappings:
+      - identifier: HostName
+        columnName: AssetName
+customDetails:
+  AffectedAsset: AssetName
+  TotalIssues: IssueCount
+  IssueCategories: Categories
+  IssueSeverities: Severities
+  TimeSpanHours: TimeSpanHours
+alertDetailsOverride:
+  alertDisplayNameFormat: "Cortex Cloud - Multiple Issues Detected on Asset: {{AssetName}}"
+  alertDescriptionFormat: "Multiple high/critical severity issues have been detected on the same asset.\n\nAsset: {{AssetName}}\nTotal Issues: {{IssueCount}}\nTime Span: {{TimeSpanHours}} hours\nSeverities: {{Severities}}\nCategories: {{Categories}}\n\nThis may indicate a compromised or highly vulnerable asset requiring immediate attention."
+  alertSeverityColumnName: AlertSeverity
+  alertDynamicProperties:
+    - alertProperty: ProviderName
+      value: "Palo Alto Networks"
+eventGroupingSettings:
+  aggregationKind: AlertPerResult
+incidentConfiguration:
+  createIncident: true
+  groupingConfiguration:
+    enabled: true
+    reopenClosedIncident: false
+    lookbackDuration: PT6H
+    matchingMethod: Selected
+    groupByEntities:
+      - Host
+    groupByCustomDetails:
+      - AffectedAsset
+version: 1.0.0
+kind: Scheduled

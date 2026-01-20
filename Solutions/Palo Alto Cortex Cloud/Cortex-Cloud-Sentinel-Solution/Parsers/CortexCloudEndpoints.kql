@@ -1,0 +1,107 @@
+// Cortex Cloud Endpoints Parser (Optimized for V2 Schema)
+// Usage: CortexCloudEndpoints | where NormalizedStatus == "Active"
+let CortexCloudEndpoints = () {
+    CortexCloudEndpoints_V2_CL
+    // 1. Map High-Speed Columns (from Screenshot)
+    | extend
+        EndpointId = tostring(AgentId_g),     // Mapped from AgentId_g
+        EndpointName = tostring(HostName_s),  // Mapped from HostName_s
+        Status = tostring(AgentStatus_s),     // Mapped from AgentStatus_s
+        // LastSeen_d is a Real/Double number (Epoch ms)
+        LastSeenTime = unixtime_milliseconds_todatetime(tolong(LastSeen_d)),
+        TagsString = tostring(Tags_s),        // Mapped from Tags_s
+        EndpointType = tostring(AgentType_s)  // Mapped from AgentType_s
+    // 2. Parse Missing Details from RawData
+    | extend RawJson = parse_json(RawData)
+    | extend
+        // Fallback for IP: Use the extracted column if available, else RawJson
+        IPAddress = coalesce(tostring(column_ifexists("IPAddress", "")), tostring(RawJson.ip[0]), tostring(RawJson.ip)),
+        MACAddress = tostring(RawJson.mac), // Often missing in top columns
+        Domain = tostring(RawJson.domain),
+        AgentVersion = tostring(RawJson.agent_version),
+        OS = tostring(RawJson.os_type),
+        OSVersion = tostring(RawJson.os_version)
+    // 3. Apply Your Logic
+    | extend
+        EndpointIdentifier = coalesce(EndpointId, EndpointName),
+        DaysSinceLastSeen = datetime_diff('day', now(), LastSeenTime),
+        Tags = split(TagsString, ","),
+
+        // Normalize Status
+        NormalizedStatus = case(
+            tolower(Status) in ("active", "online", "connected"), "Active",
+            tolower(Status) in ("offline", "disconnected", "lost_connection"), "Offline",
+            tolower(Status) in ("isolated", "disabled"), "Isolated",
+            tolower(Status) in ("unknown", "unauthorized"), "Unknown",
+            "Other"
+        ),
+
+        // OS Categorization
+        OSFamily = case(
+            OS contains "Windows", "Windows",
+            OS contains "Linux" or OS contains "Ubuntu" or OS contains "CentOS" or OS contains "RedHat", "Linux",
+            OS contains "Mac" or OS contains "macOS", "macOS",
+            OS contains "Android", "Android",
+            OS contains "iOS", "iOS",
+            "Other"
+        )
+    | extend
+        // Recalculate Stale based on normalized time
+        IsStale = DaysSinceLastSeen > 7,
+
+        // Agent Check
+        AgentOutdated = iff(isnotempty(AgentVersion) and AgentVersion != "latest", true, false), // Note: "latest" logic might need version number comparison in real world
+
+        // Network Checks
+        HasIPAddress = isnotempty(IPAddress) and IPAddress != "[]",
+        HasMACAddress = isnotempty(MACAddress),
+        IsDomainJoined = isnotempty(Domain)
+
+    // 4. Scoring Logic (Dependent on previous steps)
+    | extend
+        HealthScore = case(
+            NormalizedStatus == "Active" and DaysSinceLastSeen <= 1, 100,
+            NormalizedStatus == "Active" and DaysSinceLastSeen <= 3, 90,
+            NormalizedStatus == "Active" and DaysSinceLastSeen <= 7, 75,
+            NormalizedStatus == "Offline" and DaysSinceLastSeen <= 7, 50,
+            NormalizedStatus == "Offline" and DaysSinceLastSeen <= 14, 30,
+            NormalizedStatus == "Isolated", 40,
+            10
+        ),
+        RiskCategory = case(
+            IsStale and NormalizedStatus == "Active", "Stale-Active", // High risk (ghost endpoint)
+            IsStale and NormalizedStatus == "Offline", "Stale-Offline",
+            NormalizedStatus == "Offline" and DaysSinceLastSeen > 30, "Abandoned",
+            NormalizedStatus == "Isolated", "Isolated",
+            NormalizedStatus == "Unknown", "Unknown",
+            "Normal"
+        )
+    // 5. Final Projection
+    | project
+        TimeGenerated,
+        EndpointId,
+        EndpointName,
+        EndpointIdentifier,
+        EndpointType,
+        OS,
+        OSFamily,
+        OSVersion,
+        IPAddress,
+        MACAddress,
+        Status,
+        NormalizedStatus,
+        LastSeenTime,
+        DaysSinceLastSeen,
+        IsStale,
+        AgentVersion,
+        AgentOutdated,
+        Domain,
+        IsDomainJoined,
+        Tags,
+        HealthScore,
+        RiskCategory,
+        HasIPAddress,
+        HasMACAddress,
+        RawData
+};
+CortexCloudEndpoints

@@ -1,0 +1,284 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "## Palo Alto Cortex Cloud Overview\n---\nThis workbook provides a comprehensive overview of Issues and Cases from Palo Alto Cortex Cloud.\n\n**Data Sources:**\n- Issues (Security Alerts)\n- Cases (Incidents)"
+      },
+      "name": "text - title"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "label": "Time Range",
+            "type": 4,
+            "isRequired": true,
+            "value": {
+              "durationMs": 2592000000
+            },
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 3600000
+                },
+                {
+                  "durationMs": 14400000
+                },
+                {
+                  "durationMs": 43200000
+                },
+                {
+                  "durationMs": 86400000
+                },
+                {
+                  "durationMs": 172800000
+                },
+                {
+                  "durationMs": 259200000
+                },
+                {
+                  "durationMs": 604800000
+                },
+                {
+                  "durationMs": 1209600000
+                },
+                {
+                  "durationMs": 2592000000
+                },
+                {
+                  "durationMs": 5184000000
+                },
+                {
+                  "durationMs": 7776000000
+                }
+              ],
+              "allowCustom": true
+            },
+            "timeContext": {
+              "durationMs": 86400000
+            }
+          }
+        ],
+        "style": "pills",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces"
+      },
+      "name": "parameters - 0"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "### Issues Overview"
+      },
+      "name": "text - issues header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "CortexCloudIssues_CL\n| where TimeGenerated {TimeRange}\n| summarize \n    TotalIssues = count(),\n    CriticalIssues = countif(Severity in (\"critical\", \"Critical\")),\n    HighIssues = countif(Severity in (\"high\", \"High\")),\n    MediumIssues = countif(Severity in (\"medium\", \"Medium\")),\n    LowIssues = countif(Severity in (\"low\", \"Low\")),\n    OpenIssues = countif(Status in (\"open\", \"Open\")),\n    ResolvedIssues = countif(Status in (\"resolved\", \"Resolved\", \"closed\", \"Closed\"))\n| project \n    Metric = \"Issues\",\n    Total = TotalIssues,\n    Critical = CriticalIssues,\n    High = HighIssues,\n    Medium = MediumIssues,\n    Low = LowIssues,\n    Open = OpenIssues,\n    Resolved = ResolvedIssues",
+        "size": 4,
+        "title": "Issue Statistics",
+        "timeContext": {
+          "durationMs": 0
+        },
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "tiles",
+        "tileSettings": {
+          "titleContent": {
+            "columnMatch": "Metric",
+            "formatter": 1
+          },
+          "leftContent": {
+            "columnMatch": "Total",
+            "formatter": 12,
+            "formatOptions": {
+              "palette": "auto"
+            },
+            "numberFormat": {
+              "unit": 17,
+              "options": {
+                "style": "decimal",
+                "maximumFractionDigits": 2,
+                "maximumSignificantDigits": 3
+              }
+            }
+          },
+          "secondaryContent": {
+            "columnMatch": "Critical",
+            "formatter": 1
+          },
+          "showBorder": false
+        }
+      },
+      "customWidth": "100",
+      "name": "query - issue stats"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "CortexCloudIssues_CL\n| where TimeGenerated {TimeRange}\n| where Status in (\"open\", \"Open\")\n| summarize Count = count() by Severity = tostring(Severity)\n| order by Count desc",
+        "size": 0,
+        "title": "Open Issues by Severity",
+        "timeContext": {
+          "durationMs": 0
+        },
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "piechart",
+        "chartSettings": {
+          "seriesLabelSettings": [
+            {
+              "seriesName": "Critical",
+              "color": "redBright"
+            },
+            {
+              "seriesName": "High",
+              "color": "orange"
+            },
+            {
+              "seriesName": "Medium",
+              "color": "yellow"
+            },
+            {
+              "seriesName": "Low",
+              "color": "blue"
+            }
+          ]
+        }
+      },
+      "customWidth": "50",
+      "name": "query - issues by severity"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "CortexCloudIssues_CL\n| where TimeGenerated {TimeRange}\n| summarize Count = count() by Category = tostring(Category)\n| top 10 by Count desc",
+        "size": 0,
+        "title": "Top 10 Issue Categories",
+        "timeContext": {
+          "durationMs": 0
+        },
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "barchart"
+      },
+      "customWidth": "50",
+      "name": "query - issues by category"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "CortexCloudIssues_CL\n| where TimeGenerated {TimeRange}\n| make-series Count = count() default = 0 on TimeGenerated from {TimeRange:start} to {TimeRange:end} step 1h by Severity = tostring(Severity)\n| render timechart",
+        "size": 0,
+        "title": "Issue Trend Over Time",
+        "timeContext": {
+          "durationMs": 0
+        },
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces"
+      },
+      "customWidth": "100",
+      "name": "query - issue trend"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "### Cases Overview"
+      },
+      "name": "text - cases header"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "CortexCloudCases_CL\n| where TimeGenerated {TimeRange}\n| summarize \n    TotalCases = count(),\n    CriticalCases = countif(Priority in (\"critical\", \"Critical\")),\n    HighCases = countif(Priority in (\"high\", \"High\")),\n    OpenCases = countif(Status in (\"open\", \"Open\", \"in_progress\", \"InProgress\")),\n    ClosedCases = countif(Status in (\"closed\", \"Closed\")),\n    UnassignedCases = countif(isempty(AssignedTo) or AssignedTo == \"\")\n| project \n    Metric = \"Cases\",\n    Total = TotalCases,\n    Critical = CriticalCases,\n    High = HighCases,\n    Open = OpenCases,\n    Closed = ClosedCases,\n    Unassigned = UnassignedCases",
+        "size": 4,
+        "title": "Case Statistics",
+        "timeContext": {
+          "durationMs": 0
+        },
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "tiles",
+        "tileSettings": {
+          "showBorder": false
+        }
+      },
+      "customWidth": "100",
+      "name": "query - case stats"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "CortexCloudCases_CL\n| where TimeGenerated {TimeRange}\n| where Status in (\"open\", \"Open\", \"in_progress\", \"InProgress\")\n| summarize Count = count() by Priority = tostring(Priority)\n| order by Count desc",
+        "size": 0,
+        "title": "Open Cases by Priority",
+        "timeContext": {
+          "durationMs": 0
+        },
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "piechart"
+      },
+      "customWidth": "50",
+      "name": "query - cases by priority"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "CortexCloudCases_CL\n| where TimeGenerated {TimeRange}\n| where isnotempty(AssignedTo) and AssignedTo != \"\"\n| summarize Count = count() by AssignedTo = tostring(AssignedTo)\n| top 10 by Count desc",
+        "size": 0,
+        "title": "Top 10 Case Assignments",
+        "timeContext": {
+          "durationMs": 0
+        },
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "barchart"
+      },
+      "customWidth": "50",
+      "name": "query - cases by assignee"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "CortexCloudCases_CL\n| where TimeGenerated {TimeRange}\n| where Status in (\"closed\", \"Closed\")\n| where isnotempty(ClosedTime) and isnotempty(CreatedTime)\n| extend ResolutionTimeHours = datetime_diff('hour', todatetime(ClosedTime), todatetime(CreatedTime))\n| summarize AvgResolutionTime = avg(ResolutionTimeHours) by Priority = tostring(Priority)\n| project Priority, AvgResolutionTimeHours = round(AvgResolutionTime, 2)\n| order by AvgResolutionTimeHours asc",
+        "size": 0,
+        "title": "Average Resolution Time by Priority (Hours)",
+        "timeContext": {
+          "durationMs": 0
+        },
+        "timeContextFromParameter": "TimeRange",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "barchart"
+      },
+      "customWidth": "100",
+      "name": "query - resolution time"
+    }
+  ],
+  "styleSettings": {},
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

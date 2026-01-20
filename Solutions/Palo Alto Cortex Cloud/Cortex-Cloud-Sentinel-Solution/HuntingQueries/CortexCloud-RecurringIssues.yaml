@@ -1,0 +1,67 @@
+id: 0d1e2f3a-4b5c-6d7e-8f9a-0b1c2d3e4f5a
+name: Cortex Cloud - Recurring Issues Detection
+description: |
+  This hunting query identifies issues that repeatedly occur on the same assets.
+  Use this query to:
+  - Detect persistent vulnerabilities or misconfigurations
+  - Find incomplete remediation efforts
+  - Identify systemic security problems
+  - Prioritize root cause analysis
+requiredDataConnectors:
+  - connectorId: PaloAltoCortexCloud
+    dataTypes:
+      - CortexCloudIssues_CL
+tactics:
+  - Persistence
+  - DefenseEvasion
+relevantTechniques:
+  - T1053
+  - T1562
+query: |
+  let lookbackTime = 60d;
+  let minOccurrences = 3;
+  CortexCloudIssues_CL
+  | where TimeGenerated > ago(lookbackTime)
+  | extend AffectedAssetList = parse_json(AffectedAssets)
+  | mv-expand AffectedAsset = AffectedAssetList
+  | extend 
+      AssetName = tostring(AffectedAsset.name),
+      AssetId = tostring(AffectedAsset.id)
+  | where isnotempty(AssetName)
+  | summarize 
+      Occurrences = count(),
+      IssueIds = make_list(IssueId),
+      Severities = make_list(Severity),
+      Statuses = make_list(Status),
+      FirstSeen = min(CreatedTime),
+      LastSeen = max(CreatedTime),
+      OpenCount = countif(Status in ("open", "Open")),
+      ClosedCount = countif(Status in ("closed", "Closed"))
+      by AssetName, Category, Title
+  | where Occurrences >= minOccurrences
+  | extend 
+      TimeSpan = datetime_diff('day', LastSeen, FirstSeen),
+      RecurrenceRate = round(todouble(Occurrences) / todouble(TimeSpan + 1), 2),
+      RemediationEffectiveness = round(todouble(ClosedCount) / todouble(Occurrences) * 100, 2),
+      RiskLevel = case(
+          Occurrences >= 10 and OpenCount >= 5, "Critical",
+          Occurrences >= 5 and OpenCount >= 3, "High",
+          Occurrences >= 3, "Medium",
+          "Low"
+      )
+  | project 
+      AssetName,
+      IssueCategory = Category,
+      IssueTitle = Title,
+      RiskLevel,
+      Occurrences,
+      OpenCount,
+      ClosedCount,
+      RemediationEffectiveness,
+      RecurrenceRate,
+      TimeSpan,
+      FirstSeen,
+      LastSeen,
+      IssueIds,
+      Severities
+  | order by Occurrences desc, OpenCount desc

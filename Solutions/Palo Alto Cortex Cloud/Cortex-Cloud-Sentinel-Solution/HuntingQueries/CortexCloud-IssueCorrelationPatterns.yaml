@@ -1,0 +1,70 @@
+id: 8b9c0d1e-2f3a-4b5c-6d7e-8f9a0b1c2d3e
+name: Cortex Cloud - Issue Correlation Patterns
+description: |
+  This hunting query identifies patterns and correlations between different issue categories.
+  Use this query to:
+  - Discover attack patterns and TTPs
+  - Identify related security incidents
+  - Find common vulnerability chains
+  - Detect campaign indicators
+requiredDataConnectors:
+  - connectorId: PaloAltoCortexCloud
+    dataTypes:
+      - CortexCloudIssues_CL
+tactics:
+  - Discovery
+  - InitialAccess
+  - Execution
+relevantTechniques:
+  - T1595
+  - T1190
+  - T1059
+query: |
+  let lookbackTime = 14d;
+  let timeWindow = 1h;
+  // Get all issues
+  let AllIssues = CortexCloudIssues_CL
+  | where TimeGenerated > ago(lookbackTime)
+  | extend 
+      IssueTime = todatetime(CreatedTime),
+      IssueCategory = tostring(Category),
+      IssueSeverity = tostring(Severity)
+  | where isnotempty(IssueCategory);
+  // Self-join to find correlated issues within time window
+  AllIssues
+  | join kind=inner (
+      AllIssues
+  ) on $left.IssueTime < $right.IssueTime
+  | where datetime_diff('hour', IssueTime1, IssueTime) <= timeWindow
+  | where IssueCategory != IssueCategory1  // Different categories
+  | summarize 
+      CorrelationCount = count(),
+      AffectedAssets = dcount(AffectedAssets),
+      Severities = make_set(IssueSeverity),
+      Severities1 = make_set(IssueSeverity1),
+      ExampleIssues = make_list(IssueId, 5),
+      FirstOccurrence = min(IssueTime),
+      LastOccurrence = max(IssueTime)
+      by IssueCategory, IssueCategory1
+  | where CorrelationCount >= 3  // At least 3 correlated occurrences
+  | extend 
+      CorrelationPattern = strcat(IssueCategory, " → ", IssueCategory1),
+      TimeSpan = datetime_diff('day', LastOccurrence, FirstOccurrence),
+      RiskLevel = case(
+          CorrelationCount >= 10 and AffectedAssets >= 5, "Critical",
+          CorrelationCount >= 5 and AffectedAssets >= 3, "High",
+          CorrelationCount >= 3, "Medium",
+          "Low"
+      )
+  | project 
+      CorrelationPattern,
+      RiskLevel,
+      CorrelationCount,
+      AffectedAssets,
+      TimeSpan,
+      FirstOccurrence,
+      LastOccurrence,
+      ExampleIssues,
+      Severities,
+      Severities1
+  | order by CorrelationCount desc, AffectedAssets desc

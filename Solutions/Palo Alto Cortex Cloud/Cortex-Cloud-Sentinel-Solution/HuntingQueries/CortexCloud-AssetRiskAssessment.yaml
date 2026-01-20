@@ -1,0 +1,68 @@
+id: 6f7a8b9c-0d1e-2f3a-4b5c-6d7e8f9a0b1c
+name: Cortex Cloud - Asset Risk Assessment
+description: |
+  This hunting query performs risk assessment of assets based on issue patterns.
+  Use this query to:
+  - Identify high-risk assets with multiple issues
+  - Find assets with persistent security problems
+  - Prioritize asset remediation efforts
+  - Detect potential lateral movement targets
+requiredDataConnectors:
+  - connectorId: PaloAltoCortexCloud
+    dataTypes:
+      - CortexCloudIssues_CL
+tactics:
+  - Discovery
+  - LateralMovement
+relevantTechniques:
+  - T1046
+  - T1021
+query: |
+  let lookbackTime = 30d;
+  CortexCloudIssues_CL
+  | where TimeGenerated > ago(lookbackTime)
+  | extend AffectedAssetList = parse_json(AffectedAssets)
+  | mv-expand AffectedAsset = AffectedAssetList
+  | extend 
+      AssetName = tostring(AffectedAsset.name),
+      AssetId = tostring(AffectedAsset.id),
+      AssetType = tostring(AffectedAsset.type)
+  | where isnotempty(AssetName)
+  | summarize 
+      TotalIssues = count(),
+      CriticalIssues = countif(Severity in ("critical", "Critical")),
+      HighIssues = countif(Severity in ("high", "High")),
+      MediumIssues = countif(Severity in ("medium", "Medium")),
+      OpenIssues = countif(Status in ("open", "Open")),
+      UniqueCategories = dcount(Category),
+      Categories = make_set(Category),
+      FirstIssueDate = min(CreatedTime),
+      LastIssueDate = max(CreatedTime),
+      IssueIds = make_set(IssueId)
+      by AssetName, AssetId, AssetType
+  | extend 
+      RiskScore = (CriticalIssues * 10) + (HighIssues * 5) + (MediumIssues * 2),
+      DaysAtRisk = datetime_diff('day', now(), FirstIssueDate),
+      RiskLevel = case(
+          RiskScore >= 50, "Critical",
+          RiskScore >= 30, "High",
+          RiskScore >= 15, "Medium",
+          "Low"
+      )
+  | where RiskScore > 0
+  | project 
+      AssetName,
+      AssetType,
+      RiskLevel,
+      RiskScore,
+      TotalIssues,
+      CriticalIssues,
+      HighIssues,
+      OpenIssues,
+      UniqueCategories,
+      DaysAtRisk,
+      FirstIssueDate,
+      LastIssueDate,
+      Categories,
+      IssueIds
+  | order by RiskScore desc

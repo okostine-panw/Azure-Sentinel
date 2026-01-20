@@ -1,0 +1,81 @@
+id: 1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d
+name: Cortex Cloud - Critical Issue Detected
+description: |
+  This rule detects critical severity issues in Cortex Cloud that require immediate attention.
+  Critical issues indicate severe security risks that should be investigated and remediated promptly.
+severity: High
+requiredDataConnectors:
+  - connectorId: PaloAltoCortexCloud
+    dataTypes:
+      - CortexCloudIssues_CL
+queryFrequency: PT5M
+queryPeriod: PT10M
+triggerOperator: GreaterThan
+triggerThreshold: 0
+tactics:
+  - InitialAccess
+  - Execution
+  - Persistence
+  - PrivilegeEscalation
+  - DefenseEvasion
+  - CredentialAccess
+  - Discovery
+  - LateralMovement
+  - Collection
+  - Exfiltration
+  - Impact
+relevantTechniques:
+  - T1190
+  - T1078
+  - T1059
+  - T1053
+query: |
+  CortexCloudIssues_CL
+  | where Severity == "critical" or Severity == "Critical"
+  | where Status != "closed" and Status != "Closed" and Status != "resolved" and Status != "Resolved"
+  | extend 
+      IssueId = tostring(IssueId),
+      Title = tostring(Title),
+      Severity = tostring(Severity),
+      AffectedAssets = tostring(AffectedAssets),
+      CreatedTime = todatetime(CreatedTime)
+  | project 
+      TimeGenerated,
+      IssueId,
+      Title,
+      Severity,
+      Status,
+      Category,
+      AffectedAssets,
+      CreatedTime,
+      Description
+entityMappings: []
+customDetails:
+  IssueCategory: Category
+  IssueStatus: Status
+  IssueSeverity: Severity
+  AffectedAssets: AffectedAssets
+alertDetailsOverride:
+  alertDisplayNameFormat: "Cortex Cloud Critical Issue: {{Title}}"
+  alertDescriptionFormat: "A critical severity issue has been detected in Cortex Cloud.\n\nIssue ID: {{IssueId}}\nCategory: {{Category}}\nStatus: {{Status}}\nDescription: {{Description}}"
+  alertSeverityColumnName: Severity
+  alertDynamicProperties:
+    - alertProperty: ProviderName
+      value: "Palo Alto Networks"
+eventGroupingSettings:
+  aggregationKind: AlertPerResult
+incidentConfiguration:
+  createIncident: true
+  groupingConfiguration:
+    enabled: true
+    reopenClosedIncident: false
+    lookbackDuration: PT1H
+    matchingMethod: Selected
+    groupByEntities:
+      - Alert
+    groupByAlertDetails:
+      - DisplayName
+    groupByCustomDetails:
+      - IssueCategory
+version: 1.0.0
+kind: Scheduled

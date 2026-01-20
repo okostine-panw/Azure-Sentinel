@@ -1,0 +1,56 @@
+id: 7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d
+name: Cortex Cloud - Stale Cases Investigation
+description: |
+  This hunting query identifies cases that have not been updated recently despite being open.
+  Use this query to:
+  - Find forgotten or abandoned cases
+  - Identify cases stuck in investigation
+  - Improve case management hygiene
+  - Ensure proper case lifecycle management
+requiredDataConnectors:
+  - connectorId: PaloAltoCortexCloud
+    dataTypes:
+      - CortexCloudCases_CL
+tactics:
+  - Discovery
+relevantTechniques:
+  - T1083
+query: |
+  let staleDays = 7;
+  CortexCloudCases_CL
+  | where Status in ("open", "Open", "in_progress", "InProgress", "pending", "Pending")
+  | extend 
+      DaysSinceUpdate = datetime_diff('day', now(), todatetime(UpdatedTime)),
+      DaysSinceCreation = datetime_diff('day', now(), todatetime(CreatedTime))
+  | where DaysSinceUpdate >= staleDays
+  | extend 
+      StalenessScore = case(
+          Priority in ("critical", "Critical") and DaysSinceUpdate >= 3, 100,
+          Priority in ("critical", "Critical") and DaysSinceUpdate >= 2, 75,
+          Priority in ("high", "High") and DaysSinceUpdate >= 7, 80,
+          Priority in ("high", "High") and DaysSinceUpdate >= 5, 60,
+          Priority in ("medium", "Medium") and DaysSinceUpdate >= 14, 50,
+          Priority in ("medium", "Medium") and DaysSinceUpdate >= 10, 30,
+          20
+      ),
+      ActionRequired = case(
+          Priority in ("critical", "Critical") and DaysSinceUpdate >= 2, "Immediate",
+          Priority in ("high", "High") and DaysSinceUpdate >= 5, "Urgent",
+          Priority in ("medium", "Medium") and DaysSinceUpdate >= 10, "Required",
+          "Recommended"
+      )
+  | project 
+      TimeGenerated,
+      CaseNumber,
+      Title,
+      Priority,
+      Status,
+      AssignedTo,
+      DaysSinceUpdate,
+      DaysSinceCreation,
+      StalenessScore,
+      ActionRequired,
+      CreatedTime,
+      UpdatedTime,
+      RelatedIssueCount = array_length(RelatedIssues)
+  | order by StalenessScore desc, DaysSinceUpdate desc

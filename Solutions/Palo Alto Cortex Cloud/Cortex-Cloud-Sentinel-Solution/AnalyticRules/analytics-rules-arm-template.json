@@ -1,0 +1,209 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workspaceName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the Log Analytics workspace where Sentinel is deployed"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location for all resources"
+      }
+    }
+  },
+  "variables": {
+    "workspaceId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+      "apiVersion": "2023-02-01-preview",
+      "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/', 'CortexCloud-CriticalIssue')]",
+      "kind": "Scheduled",
+      "properties": {
+        "displayName": "Cortex Cloud - Critical Issue Detected",
+        "description": "This rule detects critical severity issues in Cortex Cloud that require immediate attention.",
+        "severity": "High",
+        "enabled": true,
+        "query": "CortexCloudIssues_CL\n| where Severity == \"critical\" or Severity == \"Critical\"\n| where Status != \"closed\" and Status != \"Closed\" and Status != \"resolved\" and Status != \"Resolved\"\n| extend \n    IssueId = tostring(IssueId),\n    Title = tostring(Title),\n    Severity = tostring(Severity)\n| project \n    TimeGenerated,\n    IssueId,\n    Title,\n    Severity,\n    Status,\n    Category,\n    Description",
+        "queryFrequency": "PT5M",
+        "queryPeriod": "PT10M",
+        "triggerOperator": "GreaterThan",
+        "triggerThreshold": 0,
+        "suppressionDuration": "PT5H",
+        "suppressionEnabled": false,
+        "tactics": [
+          "InitialAccess",
+          "Execution"
+        ],
+        "customDetails": {
+          "IssueCategory": "Category",
+          "IssueStatus": "Status",
+          "IssueSeverity": "Severity"
+        },
+        "alertDetailsOverride": {
+          "alertDisplayNameFormat": "Cortex Cloud Critical Issue: {{Title}}",
+          "alertDescriptionFormat": "Issue: {{IssueId}}\\nCategory: {{Category}}\\nStatus: {{Status}}",
+          "alertSeverityColumnName": "Severity"
+        },
+        "eventGroupingSettings": {
+          "aggregationKind": "AlertPerResult"
+        },
+        "incidentConfiguration": {
+          "createIncident": true,
+          "groupingConfiguration": {
+            "enabled": true,
+            "reopenClosedIncident": false,
+            "lookbackDuration": "PT1H",
+            "matchingMethod": "Selected",
+            "groupByAlertDetails": [
+              "DisplayName"
+            ],
+            "groupByCustomDetails": [
+              "IssueCategory"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+      "apiVersion": "2023-02-01-preview",
+      "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/', 'CortexCloud-CaseSLABreach')]",
+      "kind": "Scheduled",
+      "properties": {
+        "displayName": "Cortex Cloud - Case SLA Breach",
+        "description": "Detects cases that have breached their SLA timeframes based on priority levels.",
+        "severity": "Medium",
+        "enabled": true,
+        "query": "CortexCloudCases_CL\n| where Status in (\"new\", \"New\", \"open\", \"Open\", \"in_progress\", \"InProgress\")\n| extend \n    CaseId = tostring(CaseId),\n    CaseNumber = tostring(CaseNumber),\n    Title = tostring(Title),\n    Priority = tostring(Priority),\n    AgeInHours = datetime_diff('hour', now(), todatetime(CreatedTime))\n| extend SLABreached = case(\n    Priority == \"Critical\" and AgeInHours > 4, true,\n    Priority == \"High\" and AgeInHours > 24, true,\n    Priority == \"Medium\" and AgeInHours > 72, true,\n    Priority == \"Low\" and AgeInHours > 168, true,\n    false\n)\n| where SLABreached == true\n| project \n    TimeGenerated,\n    CaseId,\n    CaseNumber,\n    Title,\n    Priority,\n    Status,\n    AgeInHours,\n    AssignedTo",
+        "queryFrequency": "PT15M",
+        "queryPeriod": "PT30M",
+        "triggerOperator": "GreaterThan",
+        "triggerThreshold": 0,
+        "suppressionDuration": "PT5H",
+        "suppressionEnabled": false,
+        "tactics": [
+          "Impact"
+        ],
+        "entityMappings": [
+          {
+            "entityType": "Account",
+            "fieldMappings": [
+              {
+                "identifier": "FullName",
+                "columnName": "AssignedTo"
+              }
+            ]
+          }
+        ],
+        "customDetails": {
+          "CasePriority": "Priority",
+          "CaseStatus": "Status",
+          "CaseAge": "AgeInHours"
+        },
+        "alertDetailsOverride": {
+          "alertDisplayNameFormat": "Case SLA Breach: {{Title}}",
+          "alertDescriptionFormat": "Case {{CaseNumber}} breached SLA.\\nPriority: {{Priority}}\\nAge: {{AgeInHours}} hours",
+          "alertSeverityColumnName": "Priority"
+        },
+        "eventGroupingSettings": {
+          "aggregationKind": "AlertPerResult"
+        },
+        "incidentConfiguration": {
+          "createIncident": true,
+          "groupingConfiguration": {
+            "enabled": true,
+            "reopenClosedIncident": false,
+            "lookbackDuration": "PT1H",
+            "matchingMethod": "Selected",
+            "groupByEntities": [
+              "Account"
+            ],
+            "groupByCustomDetails": [
+              "CasePriority"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+      "apiVersion": "2023-02-01-preview",
+      "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/', 'CortexCloud-MultipleIssuesOnAsset')]",
+      "kind": "Scheduled",
+      "properties": {
+        "displayName": "Cortex Cloud - Multiple Issues on Single Asset",
+        "description": "Detects when multiple issues are reported for the same asset within a short time period.",
+        "severity": "Medium",
+        "enabled": true,
+        "query": "CortexCloudIssues_CL\n| where Status != \"closed\" and Status != \"Closed\"\n| extend AffectedAssetsArray = parse_json(AffectedAssets)\n| mv-expand Asset = AffectedAssetsArray\n| extend AssetName = tostring(Asset)\n| where isnotempty(AssetName)\n| summarize \n    IssueCount = count(),\n    IssueIds = make_set(IssueId),\n    IssueCategories = make_set(Category),\n    MaxSeverity = max(Severity),\n    LatestTime = max(CreatedTime)\n    by AssetName\n| where IssueCount >= 3\n| extend TimeGenerated = todatetime(LatestTime)\n| project \n    TimeGenerated,\n    AssetName,\n    IssueCount,\n    MaxSeverity,\n    IssueCategories",
+        "queryFrequency": "PT15M",
+        "queryPeriod": "PT1H",
+        "triggerOperator": "GreaterThan",
+        "triggerThreshold": 0,
+        "suppressionDuration": "PT5H",
+        "suppressionEnabled": false,
+        "tactics": [
+          "InitialAccess",
+          "Persistence"
+        ],
+        "entityMappings": [
+          {
+            "entityType": "Host",
+            "fieldMappings": [
+              {
+                "identifier": "HostName",
+                "columnName": "AssetName"
+              }
+            ]
+          }
+        ],
+        "customDetails": {
+          "AssetName": "AssetName",
+          "IssueCount": "IssueCount",
+          "MaxSeverity": "MaxSeverity"
+        },
+        "alertDetailsOverride": {
+          "alertDisplayNameFormat": "Multiple Issues on Asset: {{AssetName}}",
+          "alertDescriptionFormat": "{{IssueCount}} issues detected.\\nSeverity: {{MaxSeverity}}\\nCategories: {{IssueCategories}}",
+          "alertSeverityColumnName": "MaxSeverity"
+        },
+        "eventGroupingSettings": {
+          "aggregationKind": "AlertPerResult"
+        },
+        "incidentConfiguration": {
+          "createIncident": true,
+          "groupingConfiguration": {
+            "enabled": true,
+            "reopenClosedIncident": false,
+            "lookbackDuration": "PT1H",
+            "matchingMethod": "AllEntities",
+            "groupByEntities": [
+              "Host"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "criticalIssueRuleId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.OperationalInsights/workspaces/providers/alertRules', parameters('workspaceName'), 'Microsoft.SecurityInsights', 'CortexCloud-CriticalIssue')]"
+    },
+    "caseSLABreachRuleId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.OperationalInsights/workspaces/providers/alertRules', parameters('workspaceName'), 'Microsoft.SecurityInsights', 'CortexCloud-CaseSLABreach')]"
+    },
+    "multipleIssuesRuleId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.OperationalInsights/workspaces/providers/alertRules', parameters('workspaceName'), 'Microsoft.SecurityInsights', 'CortexCloud-MultipleIssuesOnAsset')]"
+    }
+  }
+}

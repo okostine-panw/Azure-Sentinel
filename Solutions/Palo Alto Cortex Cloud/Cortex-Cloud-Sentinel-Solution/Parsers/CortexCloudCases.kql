@@ -1,0 +1,102 @@
+// Cortex Cloud Cases Parser (Optimized for your Schema)
+// Save as function alias: CortexCloudCases
+let CortexCloudCases = () {
+    CortexCloudCases_V2_CL
+    // 1. Rename the ugly Azure columns (_s) to clean names
+    | project
+        TimeGenerated,
+        CaseId = CaseId_s,              // Mapped from screenshot
+        Title = Title_s,                // Mapped from screenshot
+        Description = Description_s,    // Mapped from screenshot
+        Severity = Severity_s,          // Mapped from screenshot
+        Status = Status_s,              // Mapped from screenshot
+        Link = Link_s,                  // Mapped from screenshot
+        AlertCount = toint(AlertCount_d), // Mapped from screenshot (_d = double/real)
+        AssetNames = AssetNames_s,      // Mapped from screenshot
+        Techniques = Techniques_s,
+        Tactics = Tactics_s,
+        Tags = Tags_s,
+        ResolveReason = ResolveReason_s,
+        ResolveComment = ResolveComment_s,
+        RawData
+    // 2. Parse Timestamps from RawData (safest method)
+    | extend RawJson = parse_json(RawData)
+    | extend
+        CreatedTime = unixtime_milliseconds_todatetime(tolong(RawJson.creation_time)),
+        UpdatedTime = unixtime_milliseconds_todatetime(tolong(RawJson.modification_time)),
+        ClosedTime = unixtime_milliseconds_todatetime(tolong(RawJson.resolved_timestamp))
+    // 3. Logic & Normalization
+    | extend
+        Priority = case(
+            tolower(Severity) == "critical", "Critical",
+            tolower(Severity) == "high", "High",
+            tolower(Severity) == "medium", "Medium",
+            tolower(Severity) == "low", "Low",
+            "Unknown"
+        ),
+        NormalizedStatus = case(
+            tolower(Status) == "new", "New",
+            tolower(Status) == "open", "Open",
+            tolower(Status) == "under_investigation", "InProgress",
+            tolower(Status) == "resolved", "Resolved",
+            tolower(Status) == "closed", "Closed",
+            Status
+        ),
+        // Handle Tags (Convert "tag1, tag2" string to a list)
+        TagsList = split(Tags, ","),
+        AssignedTo = coalesce(tostring(RawJson.assigned_user_pretty_name), "Unassigned"),
+        DeepLink = Link
+    // 4. SLA & Timing Calculations
+    | extend
+        AgeInHours = datetime_diff('hour', now(), CreatedTime),
+        TimeSinceUpdatedHours = datetime_diff('hour', now(), UpdatedTime),
+        TagsCount = array_length(TagsList),
+        IsAssigned = AssignedTo != "Unassigned" and isnotempty(AssignedTo)
+    | extend SLAStatus = case(
+        Priority == "Critical" and NormalizedStatus in ("New", "Open", "InProgress") and AgeInHours > 4, "Breached",
+        Priority == "Critical" and NormalizedStatus in ("New", "Open", "InProgress") and AgeInHours > 3, "AtRisk",
+        Priority == "High" and NormalizedStatus in ("New", "Open", "InProgress") and AgeInHours > 24, "Breached",
+        Priority == "High" and NormalizedStatus in ("New", "Open", "InProgress") and AgeInHours > 20, "AtRisk",
+        Priority == "Medium" and NormalizedStatus in ("New", "Open", "InProgress") and AgeInHours > 72, "Breached",
+        Priority == "Medium" and NormalizedStatus in ("New", "Open", "InProgress") and AgeInHours > 60, "AtRisk",
+        Priority == "Low" and NormalizedStatus in ("New", "Open", "InProgress") and AgeInHours > 168, "Breached",
+        NormalizedStatus in ("Resolved", "Closed"), "Met",
+        "OnTrack"
+    )
+    | extend TimeToClose = datetime_diff('hour', ClosedTime, CreatedTime)
+    | extend NeedsAttention = case(
+        NormalizedStatus in ("New", "Open") and not(IsAssigned), true,
+        SLAStatus in ("Breached", "AtRisk"), true,
+        NormalizedStatus in ("New", "Open", "InProgress") and TimeSinceUpdatedHours > 24, true,
+        false
+    )
+    // 5. Final Output Columns
+    | project
+        TimeGenerated,
+        CaseId,
+        Title,
+        Description,
+        Priority,
+        Status = NormalizedStatus,
+        AssignedTo,
+        IsAssigned,
+        AlertCount,
+        AssetNames,
+        Techniques,
+        Tactics,
+        CreatedTime,
+        UpdatedTime,
+        ClosedTime,
+        AgeInHours,
+        TimeSinceUpdatedHours,
+        TimeToClose,
+        SLAStatus,
+        NeedsAttention,
+        Tags = TagsList,
+        TagsCount,
+        DeepLink,
+        ResolveReason,
+        ResolveComment,
+        RawData
+};
+CortexCloudCases

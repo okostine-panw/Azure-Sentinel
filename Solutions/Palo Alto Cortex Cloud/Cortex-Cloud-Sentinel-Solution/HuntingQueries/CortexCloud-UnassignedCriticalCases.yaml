@@ -1,0 +1,41 @@
+id: 5e6f7a8b-9c0d-1e2f-3a4b-5c6d7e8f9a0b
+name: Cortex Cloud - Unassigned Critical Cases
+description: |
+  This hunting query identifies critical and high priority cases that remain unassigned.
+  Use this query to:
+  - Find cases requiring immediate assignment
+  - Identify workload distribution issues
+  - Ensure critical cases have proper ownership
+requiredDataConnectors:
+  - connectorId: PaloAltoCortexCloud
+    dataTypes:
+      - CortexCloudCases_CL
+tactics:
+  - Discovery
+relevantTechniques:
+  - T1083
+query: |
+  let lookbackTime = 7d;
+  CortexCloudCases_CL
+  | where TimeGenerated > ago(lookbackTime)
+  | where Status in ("open", "Open", "in_progress", "InProgress")
+  | where isempty(AssignedTo) or AssignedTo == ""
+  | where Priority in ("critical", "Critical", "high", "High")
+  | extend 
+      CaseAge = datetime_diff('hour', now(), todatetime(CreatedTime)),
+      UrgencyScore = case(
+          Priority in ("critical", "Critical"), 100,
+          Priority in ("high", "High"), 75,
+          50
+      )
+  | project 
+      TimeGenerated,
+      CaseNumber,
+      Title,
+      Priority,
+      Status,
+      CaseAge,
+      UrgencyScore,
+      CreatedTime,
+      RelatedIssueCount = array_length(RelatedIssues)
+  | order by UrgencyScore desc, CaseAge desc

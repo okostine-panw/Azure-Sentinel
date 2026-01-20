@@ -1,0 +1,97 @@
+id: 2b3c4d5e-6f7a-8b9c-0d1e-2f3a4b5c6d7e
+name: Cortex Cloud - Case SLA Breach
+description: |
+  This rule detects Cortex Cloud cases that have breached their Service Level Agreement (SLA) thresholds.
+  Cases that breach SLA require immediate attention to meet organizational response time objectives.
+  
+  SLA Thresholds:
+  - Critical: 4 hours
+  - High: 24 hours
+  - Medium: 72 hours
+  - Low: 168 hours (7 days)
+severity: Medium
+requiredDataConnectors:
+  - connectorId: PaloAltoCortexCloud
+    dataTypes:
+      - CortexCloudCases_CL
+queryFrequency: PT15M
+queryPeriod: PT30M
+triggerOperator: GreaterThan
+triggerThreshold: 0
+tactics:
+  - Impact
+relevantTechniques:
+  - T1499
+query: |
+  CortexCloudCases_CL
+  | where Status != "closed" and Status != "Closed"
+  | extend 
+      CaseId = tostring(CaseId),
+      CaseNumber = tostring(CaseNumber),
+      Title = tostring(Title),
+      Priority = tostring(Priority),
+      Status = tostring(Status),
+      AssignedTo = tostring(AssignedTo),
+      CreatedTime = todatetime(CreatedTime),
+      AgeInHours = datetime_diff('hour', now(), todatetime(CreatedTime))
+  // Define SLA thresholds
+  | extend SLAThresholdHours = case(
+      tolower(Priority) == "critical", 4,
+      tolower(Priority) == "high", 24,
+      tolower(Priority) == "medium", 72,
+      tolower(Priority) == "low", 168,
+      168
+  )
+  // Identify SLA breaches
+  | where AgeInHours > SLAThresholdHours
+  | extend 
+      SLABreachHours = AgeInHours - SLAThresholdHours,
+      SLABreachDescription = strcat("Case has breached SLA by ", tostring(AgeInHours - SLAThresholdHours), " hours")
+  | project 
+      TimeGenerated,
+      CaseId,
+      CaseNumber,
+      Title,
+      Priority,
+      Status,
+      AssignedTo,
+      CreatedTime,
+      AgeInHours,
+      SLAThresholdHours,
+      SLABreachHours,
+      SLABreachDescription,
+      Description
+entityMappings:
+  - entityType: Account
+    fieldMappings:
+      - identifier: FullName
+        columnName: AssignedTo
+customDetails:
+  CaseNumber: CaseNumber
+  CasePriority: Priority
+  CaseStatus: Status
+  CaseAge: AgeInHours
+  SLABreachHours: SLABreachHours
+  AssignedAnalyst: AssignedTo
+alertDetailsOverride:
+  alertDisplayNameFormat: "Cortex Cloud Case SLA Breach: {{CaseNumber}} - {{Title}}"
+  alertDescriptionFormat: "Case {{CaseNumber}} has breached its SLA threshold.\n\nPriority: {{Priority}}\nAge: {{AgeInHours}} hours\nSLA Threshold: {{SLAThresholdHours}} hours\nBreach Duration: {{SLABreachHours}} hours\nAssigned To: {{AssignedTo}}\n\n{{SLABreachDescription}}"
+  alertSeverityColumnName: Priority
+  alertDynamicProperties:
+    - alertProperty: ProviderName
+      value: "Palo Alto Networks"
+eventGroupingSettings:
+  aggregationKind: AlertPerResult
+incidentConfiguration:
+  createIncident: true
+  groupingConfiguration:
+    enabled: true
+    reopenClosedIncident: false
+    lookbackDuration: PT24H
+    matchingMethod: Selected
+    groupByAlertDetails:
+      - DisplayName
+    groupByCustomDetails:
+      - CaseNumber
+version: 1.0.0
+kind: Scheduled

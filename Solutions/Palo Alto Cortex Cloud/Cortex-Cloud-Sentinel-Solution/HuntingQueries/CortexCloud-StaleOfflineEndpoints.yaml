@@ -1,0 +1,64 @@
+id: 1e2f3a4b-5c6d-7e8f-9a0b-1c2d3e4f5a6b
+name: Cortex Cloud - Stale and Offline Endpoints
+description: |
+  This hunting query identifies endpoints that are offline, stale, or have not checked in recently.
+  Use this query to:
+  - Find endpoints that may have been decommissioned but not removed
+  - Identify endpoints with connectivity issues
+  - Detect potentially compromised endpoints that have gone dark
+  - Maintain accurate asset inventory
+requiredDataConnectors:
+  - connectorId: PaloAltoCortexCloud
+    dataTypes:
+      - CortexCloudEndpoints_CL
+tactics:
+  - Discovery
+  - DefenseEvasion
+relevantTechniques:
+  - T1083
+  - T1562
+query: |
+  let lookbackTime = 30d;
+  let staleThreshold = 7d;
+  let criticalOfflineThreshold = 3d;
+  CortexCloudEndpoints_CL
+  | where TimeGenerated > ago(lookbackTime)
+  | summarize 
+      arg_max(TimeGenerated, *) by EndpointId
+  | extend 
+      DaysSinceLastSeen = datetime_diff('day', now(), LastSeenTime),
+      IsStale = datetime_diff('day', now(), LastSeenTime) > 7,
+      IsCriticalOffline = datetime_diff('day', now(), LastSeenTime) > 3 and Status in ("offline", "Offline")
+  | where IsStale or IsCriticalOffline or Status in ("offline", "Offline", "unknown", "Unknown")
+  | extend 
+      RiskLevel = case(
+          IsStale and Status in ("offline", "Offline"), "Critical",
+          IsCriticalOffline, "High",
+          IsStale, "Medium",
+          Status in ("offline", "Offline"), "Medium",
+          "Low"
+      ),
+      ActionRequired = case(
+          DaysSinceLastSeen > 30, "Investigate - Potentially Abandoned",
+          DaysSinceLastSeen > 14, "Review - Extended Offline",
+          DaysSinceLastSeen > 7, "Monitor - Stale Endpoint",
+          DaysSinceLastSeen > 3 and Status in ("offline", "Offline"), "Alert - Recent Offline",
+          "Track"
+      )
+  | project 
+      LastSeenTime,
+      EndpointName,
+      EndpointId,
+      EndpointType,
+      OS,
+      OSVersion,
+      Status,
+      IPAddress,
+      Domain,
+      DaysSinceLastSeen,
+      IsStale,
+      IsCriticalOffline,
+      RiskLevel,
+      ActionRequired,
+      AgentVersion
+  | order by DaysSinceLastSeen desc, RiskLevel desc

@@ -1,0 +1,71 @@
+id: 9c0d1e2f-3a4b-5c6d-7e8f-9a0b1c2d3e4f
+name: Cortex Cloud - Analyst Workload Analysis
+description: |
+  This hunting query analyzes case distribution and workload across analysts.
+  Use this query to:
+  - Balance workload across team members
+  - Identify overburdened analysts
+  - Optimize case assignment strategies
+  - Improve team efficiency
+requiredDataConnectors:
+  - connectorId: PaloAltoCortexCloud
+    dataTypes:
+      - CortexCloudCases_CL
+tactics:
+  - Discovery
+relevantTechniques:
+  - T1083
+query: |
+  let lookbackTime = 30d;
+  CortexCloudCases_CL
+  | where TimeGenerated > ago(lookbackTime)
+  | where isnotempty(AssignedTo) and AssignedTo != ""
+  | extend 
+      IsClosed = Status in ("closed", "Closed"),
+      IsOpen = Status in ("open", "Open", "in_progress", "InProgress"),
+      ResolutionTime = iff(
+          isnotempty(ClosedTime),
+          datetime_diff('hour', todatetime(ClosedTime), todatetime(CreatedTime)),
+          long(null)
+      )
+  | summarize 
+      TotalCases = count(),
+      OpenCases = countif(IsOpen),
+      ClosedCases = countif(IsClosed),
+      CriticalCases = countif(Priority in ("critical", "Critical")),
+      HighCases = countif(Priority in ("high", "High")),
+      AvgResolutionTimeHours = avg(ResolutionTime),
+      MedianResolutionTimeHours = percentile(ResolutionTime, 50),
+      FastestResolution = min(ResolutionTime),
+      SlowestResolution = max(ResolutionTime),
+      CaseNumbers = make_list(CaseNumber, 100)
+      by AssignedTo
+  | extend 
+      WorkloadScore = (OpenCases * 2) + (CriticalCases * 5) + (HighCases * 3),
+      ClosureRate = round(todouble(ClosedCases) / todouble(TotalCases) * 100, 2),
+      WorkloadLevel = case(
+          WorkloadScore >= 50, "Overloaded",
+          WorkloadScore >= 30, "High",
+          WorkloadScore >= 15, "Moderate",
+          "Light"
+      ),
+      PerformanceRating = case(
+          ClosureRate >= 80 and AvgResolutionTimeHours <= 48, "Excellent",
+          ClosureRate >= 70 and AvgResolutionTimeHours <= 72, "Good",
+          ClosureRate >= 50, "Fair",
+          "Needs Attention"
+      )
+  | project 
+      Analyst = AssignedTo,
+      WorkloadLevel,
+      WorkloadScore,
+      TotalCases,
+      OpenCases,
+      ClosedCases,
+      ClosureRate,
+      CriticalCases,
+      HighCases,
+      AvgResolutionTimeHours = round(AvgResolutionTimeHours, 1),
+      MedianResolutionTimeHours = round(MedianResolutionTimeHours, 1),
+      PerformanceRating
+  | order by WorkloadScore desc

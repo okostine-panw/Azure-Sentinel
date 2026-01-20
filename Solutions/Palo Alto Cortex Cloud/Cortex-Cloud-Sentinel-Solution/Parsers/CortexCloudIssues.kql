@@ -1,0 +1,86 @@
+// Cortex Cloud Issues Parser (Optimized for Schema)
+// Usage: CortexCloudIssues | where Severity == "Critical"
+let CortexCloudIssues = () {
+    CortexCloudIssues_V2_CL
+    // 1. Map existing Azure columns (_s) for speed
+    | project
+        TimeGenerated,
+        IssueId = IssueId_s,    // Mapped from screenshot
+        Title = Title_s,        // Mapped from screenshot
+        Severity = Severity_s,  // Mapped from screenshot
+        RawData
+    // 2. Parse everything else from RawData
+    | extend RawJson = parse_json(RawData)
+    | extend
+        Description = tostring(RawJson.description),
+        Category = tostring(RawJson.category),
+        Status = tostring(RawJson.status),
+        // Timestamps: Convert Epoch Milliseconds to DateTime
+        ModifiedTime = unixtime_milliseconds_todatetime(tolong(RawJson.last_modified)),
+        CreatedTime = unixtime_milliseconds_todatetime(tolong(RawJson.observation_time)),
+        // Assets are often a nested array in RawJson
+        AffectedAssetsList = RawJson.asset_ids,
+        TagsList = split(tostring(RawJson.tags), ",")
+    // 3. Logic & Normalization
+    | extend
+        NormalizedSeverity = case(
+            tolower(Severity) == "critical", "Critical",
+            tolower(Severity) == "high", "High",
+            tolower(Severity) == "medium", "Medium",
+            tolower(Severity) == "low", "Low",
+            tolower(Severity) == "informational", "Informational",
+            Severity // Fallback to original if unknown
+        ),
+        NormalizedStatus = case(
+            tolower(Status) == "new", "New",
+            tolower(Status) == "open", "Open",
+            tolower(Status) == "under_investigation", "InProgress",
+            tolower(Status) == "resolved", "Resolved",
+            tolower(Status) == "closed", "Closed",
+            Status
+        )
+    | extend
+        AffectedAssetCount = array_length(AffectedAssetsList),
+        TagsCount = array_length(TagsList),
+        AgeInHours = datetime_diff('hour', now(), CreatedTime),
+        TimeSinceModifiedHours = datetime_diff('hour', now(), ModifiedTime)
+    // 4. Risk Scoring Logic
+    | extend RiskScore = case(
+        NormalizedSeverity == "Critical" and AgeInHours > 24, 100,
+        NormalizedSeverity == "Critical" and AgeInHours > 12, 90,
+        NormalizedSeverity == "Critical", 80,
+        NormalizedSeverity == "High" and AgeInHours > 48, 70,
+        NormalizedSeverity == "High" and AgeInHours > 24, 60,
+        NormalizedSeverity == "High", 50,
+        NormalizedSeverity == "Medium" and AgeInHours > 72, 40,
+        NormalizedSeverity == "Medium", 30,
+        NormalizedSeverity == "Low", 20,
+        10
+    )
+    | extend AgeDescription = case(
+        AgeInHours < 1, strcat(tostring(datetime_diff('minute', now(), CreatedTime)), " minutes"),
+        AgeInHours < 24, strcat(tostring(AgeInHours), " hours"),
+        AgeInHours < 168, strcat(tostring(AgeInHours / 24), " days"),
+        strcat(tostring(AgeInHours / 168), " weeks")
+    )
+    | project
+        TimeGenerated,
+        IssueId,
+        Title,
+        Description,
+        Severity = NormalizedSeverity,
+        Status = NormalizedStatus,
+        Category,
+        RiskScore,
+        AffectedAssets = AffectedAssetsList,
+        AffectedAssetCount,
+        CreatedTime,
+        ModifiedTime,
+        AgeInHours,
+        AgeDescription,
+        TimeSinceModifiedHours,
+        Tags = TagsList,
+        TagsCount,
+        RawData
+};
+CortexCloudIssues

@@ -1,0 +1,236 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "PlaybookName": {
+      "defaultValue": "CortexCloud-CloseCase-v2",
+      "type": "string"
+    },
+    "CortexCloudFqdn": {
+      "type": "string"
+    },
+    "CortexCloudApiKeyId": {
+      "type": "string"
+    },
+    "KeyVaultName": {
+      "type": "string"
+    },
+    "ApiKeySecretName": {
+      "defaultValue": "CortexCloudApiKey",
+      "type": "string"
+    }
+  },
+  "variables": {
+    "SentinelConnectionName": "[concat('sentinel-', parameters('PlaybookName'))]",
+    "KeyVaultConnectionName": "[concat('keyvault-', parameters('PlaybookName'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Web/connections",
+      "apiVersion": "2016-06-01",
+      "name": "[variables('SentinelConnectionName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "displayName": "[variables('SentinelConnectionName')]",
+        "parameterValueType": "Alternative",
+        "api": {
+          "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuresentinel')]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Web/connections",
+      "apiVersion": "2016-06-01",
+      "name": "[variables('KeyVaultConnectionName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "displayName": "[variables('KeyVaultConnectionName')]",
+        "parameterValueType": "Alternative",
+        "alternativeParameterValues": {
+          "vaultName": "[parameters('KeyVaultName')]"
+        },
+        "api": {
+          "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/keyvault')]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2017-07-01",
+      "name": "[parameters('PlaybookName')]",
+      "location": "[resourceGroup().location]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/connections', variables('SentinelConnectionName'))]",
+        "[resourceId('Microsoft.Web/connections', variables('KeyVaultConnectionName'))]"
+      ],
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "$connections": {
+              "defaultValue": {},
+              "type": "Object"
+            },
+            "CortexCloudFqdn": {
+              "defaultValue": "[parameters('CortexCloudFqdn')]",
+              "type": "String"
+            },
+            "CortexCloudApiKeyId": {
+              "defaultValue": "[parameters('CortexCloudApiKeyId')]",
+              "type": "String"
+            }
+          },
+          "triggers": {
+            "incident_trigger": {
+              "type": "ApiConnectionWebhook",
+              "inputs": {
+                "body": {
+                  "callback_url": "@{listCallbackUrl()}"
+                },
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                  }
+                },
+                "path": "/incident-creation"
+              }
+            }
+          },
+          "actions": {
+            "Get_API_Key": {
+              "runAfter": {},
+              "type": "ApiConnection",
+              "inputs": {
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['keyvault']['connectionId']"
+                  }
+                },
+                "method": "get",
+                "path": "/secrets/@{encodeURIComponent('CortexCloudApiKey')}/value"
+              }
+            },
+            "Get_Incident_Status": {
+              "runAfter": {
+                "Get_API_Key": ["Succeeded"]
+              },
+              "type": "Compose",
+              "inputs": "@triggerBody()?['object']?['properties']?['status']"
+            },
+            "Check_If_Closed": {
+              "runAfter": {
+                "Get_Incident_Status": ["Succeeded"]
+              },
+              "type": "If",
+              "expression": {
+                "and": [
+                  {
+                    "equals": [
+                      "@outputs('Get_Incident_Status')",
+                      "Closed"
+                    ]
+                  }
+                ]
+              },
+              "actions": {
+                "Parse_Custom_Details": {
+                  "type": "ParseJson",
+                  "inputs": {
+                    "content": "@triggerBody()?['object']?['properties']?['additionalData']?['customDetails']",
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "CaseId": {"type": "array"}
+                      }
+                    }
+                  }
+                },
+                "Get_Close_Reason": {
+                  "runAfter": {
+                    "Parse_Custom_Details": ["Succeeded"]
+                  },
+                  "type": "Compose",
+                  "inputs": "@coalesce(triggerBody()?['object']?['properties']?['incidentClassification'], 'Resolved')"
+                },
+                "Close_Case_In_Cortex": {
+                  "runAfter": {
+                    "Get_Close_Reason": ["Succeeded"]
+                  },
+                  "type": "Http",
+                  "inputs": {
+                    "method": "POST",
+                    "uri": "https://api-@{parameters('CortexCloudFqdn')}/public_api/v1/case/update",
+                    "headers": {
+                      "x-xdr-auth-id": "@parameters('CortexCloudApiKeyId')",
+                      "Authorization": "@{body('Get_API_Key')?['value']}",
+                      "Content-Type": "application/json"
+                    },
+                    "body": {
+                      "request_data": {
+                        "case_id": "@{first(body('Parse_Custom_Details')?['CaseId'])}",
+                        "update_data": {
+                          "status": "closed",
+                          "close_reason": "@{outputs('Get_Close_Reason')}"
+                        }
+                      }
+                    }
+                  }
+                },
+                "Add_Comment": {
+                  "runAfter": {
+                    "Close_Case_In_Cortex": ["Succeeded"]
+                  },
+                  "type": "ApiConnection",
+                  "inputs": {
+                    "body": {
+                      "incidentArmId": "@triggerBody()?['object']?['id']",
+                      "message": "Case closed in Cortex Cloud with reason: @{outputs('Get_Close_Reason')}"
+                    },
+                    "host": {
+                      "connection": {
+                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                      }
+                    },
+                    "method": "post",
+                    "path": "/Incidents/Comment"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": {
+          "$connections": {
+            "value": {
+              "azuresentinel": {
+                "connectionId": "[resourceId('Microsoft.Web/connections', variables('SentinelConnectionName'))]",
+                "connectionName": "[variables('SentinelConnectionName')]",
+                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/azuresentinel')]",
+                "connectionProperties": {
+                  "authentication": {
+                    "type": "ManagedServiceIdentity"
+                  }
+                }
+              },
+              "keyvault": {
+                "connectionId": "[resourceId('Microsoft.Web/connections', variables('KeyVaultConnectionName'))]",
+                "connectionName": "[variables('KeyVaultConnectionName')]",
+                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/keyvault')]",
+                "connectionProperties": {
+                  "authentication": {
+                    "type": "ManagedServiceIdentity"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

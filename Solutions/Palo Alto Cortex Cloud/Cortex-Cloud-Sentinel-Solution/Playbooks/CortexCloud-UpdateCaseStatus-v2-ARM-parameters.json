@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "PlaybookName": {
+      "value": "CortexCloud-UpdateCaseStatus-v2"
+    },
+    "CortexCloudFqdn": {
+      "value": "YOUR-TENANT.xdr.us.paloaltonetworks.com"
+    },
+    "CortexCloudApiKeyId": {
+      "value": "YOUR-API-KEY-ID"
+    },
+    "KeyVaultName": {
+      "value": "YOUR-KEYVAULT-NAME"
+    },
+    "ApiKeySecretName": {
+      "value": "CortexCloudApiKey"
+    }
+  }
+}

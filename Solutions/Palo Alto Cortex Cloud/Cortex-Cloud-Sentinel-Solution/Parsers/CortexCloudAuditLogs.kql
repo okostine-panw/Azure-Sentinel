@@ -1,0 +1,38 @@
+// Cortex Cloud Audit Logs Parser
+// Usage: CortexCloudAuditLogs | where User == "admin@example.com"
+let CortexCloudAuditLogs = () {
+    CortexCloudAuditLogs_CL
+    | extend RawJson = parse_json(RawData)
+    | extend
+        EventId = tostring(RawJson.audit_id),
+        // Convert Cortex Epoch ms to readable DateTime
+        EventTime = unixtime_milliseconds_todatetime(tolong(RawJson.timestamp)),
+        EventType = tostring(RawJson.audit_type), // e.g., "System", "Policy"
+        User = tostring(RawJson.user_name),
+        Action = tostring(RawJson.action),        // e.g., "Log In", "Delete"
+        Resource = tostring(RawJson.resource),    // e.g., Policy Name
+        Result = tostring(RawJson.result),        // e.g., "Success", "Failure"
+        SourceIP = tostring(RawJson.source_ip),
+        Description = tostring(RawJson.description),
+        EntityId = tostring(RawJson.entity_id)
+    | extend
+        // Useful calculated field for rapid filtering
+        IsFailure = tolower(Result) contains "fail" or tolower(Result) contains "error",
+        IsAdminAction = tolower(User) contains "admin" or tolower(User) contains "service-account"
+    | project
+        TimeGenerated,
+        EventTime,
+        EventId,
+        EventType,
+        User,
+        IsAdminAction,
+        Action,
+        Resource,
+        Result,
+        IsFailure,
+        SourceIP,
+        Description,
+        EntityId,
+        RawData
+};
+CortexCloudAuditLogs
