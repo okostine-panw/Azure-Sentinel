@@ -1,6 +1,0 @@
-# DO NOT include azure-functions-worker in this file
-# The Python Worker is managed by Azure Functions platform
-# See https://aka.ms/azure-functions-python-library
-
-azure-functions
-requests>=2.28.0
